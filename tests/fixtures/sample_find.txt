@@ -1,0 +1,18 @@
+* Exemplo com acesso a banco Adabas: lê funcionários por nome
+DEFINE DATA LOCAL
+  1 EMPLOYEES VIEW OF EMPLOYEES-FILE
+    2 NAME     (A30)
+    2 CITY     (A20)
+    2 SALARY   (N10.2)
+  1 #COUNT    (I4)
+END-DEFINE
+*
+RESET #COUNT
+READ EMPLOYEES BY NAME
+  IF SALARY > 5000
+    ADD 1 TO #COUNT
+    DISPLAY NAME CITY SALARY
+  END-IF
+END-READ
+WRITE 'Total acima de 5000: ' #COUNT
+END
