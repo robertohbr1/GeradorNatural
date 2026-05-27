@@ -74,3 +74,44 @@ class TestKeywordRecognition:
         # linha 2 em branco descartada; END está na linha 3
         end_tok = next(t for t in tokens if t.keyword == "END")
         assert end_tok.line_no == 3
+
+class TestLineContinuation:
+    def test_multiline_if_with_and_or(self) -> None:
+        lines = [
+            "IF #VAR1 = 1 AND  \n",
+            "   (#VAR2 = 2 OR  \n",
+            "    #VAR3 = 3)    \n",
+            "  WRITE 'OK'\n",
+            "END-IF\n"
+        ]
+        tokens = _tok(lines)
+        assert len(tokens) == 3
+        assert tokens[0].keyword == "IF"
+        # The args should be concatenated with spaces
+        assert tokens[0].args == "#VAR1 = 1 AND (#VAR2 = 2 OR #VAR3 = 3)"
+        
+    def test_multiline_compute_with_operator(self) -> None:
+        lines = [
+            "COMPUTE #X = 1 + \n",
+            "             2 * \n",
+            "             3   \n",
+            "WRITE #X\n"
+        ]
+        tokens = _tok(lines)
+        assert len(tokens) == 2
+        assert tokens[0].keyword == "COMPUTE"
+        assert tokens[0].args == "#X = 1 + 2 * 3"
+
+    def test_multiline_with_unclosed_parens(self) -> None:
+        lines = [
+            "COMPUTE #X = ( 1 \n",
+            "             + 2 \n",
+            "             + 3 ) \n",
+            "WRITE #X\n"
+        ]
+        tokens = _tok(lines)
+        assert len(tokens) == 2
+        assert tokens[0].keyword == "COMPUTE"
+        assert tokens[0].args == "#X = ( 1 + 2 + 3 )"
+
+

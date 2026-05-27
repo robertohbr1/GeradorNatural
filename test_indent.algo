@@ -1,0 +1,6 @@
+SE A = 1 ENTÃO
+  FAÇA
+    ESCREVER 'A'
+  FIM-FAÇA
+  ESCREVER 'B'
+FIM-SE

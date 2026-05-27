@@ -1,0 +1,2 @@
+0010 IF SAT-COD-INSCR-CGCTE = 0 REINPUT 'Informe o cgcte' ALARM
+0020 IF #DATA-TRANSF = 0 REINPUT 'Informe a referencia da transferencia' MARK 2 ALARM

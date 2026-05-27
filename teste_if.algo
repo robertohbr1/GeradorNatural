@@ -1,0 +1,6 @@
+SE SAT-COD-INSCR-CGCTE = 0 ENTÃO
+  RELER 'Informe o cgcte' ALARM
+FIM-SE
+SE #DATA-TRANSF = 0 ENTÃO
+  RELER 'Informe a referencia da transferencia' MARK 2 ALARM
+FIM-SE

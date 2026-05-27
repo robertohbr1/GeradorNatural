@@ -1,5 +1,6 @@
 """Testes do emitter: saída final em pseudocódigo português."""
 
+import os
 from nat2algo.emitter import emit
 from nat2algo.lexer import tokenize_lines
 from nat2algo.parser import parse
@@ -115,8 +116,8 @@ class TestGoldenFiles:
     """Testa a saída completa contra o arquivo de fixture básico."""
 
     def test_basic_fixture_contains_expected_lines(self) -> None:
-        fixture = (
-            "c:\\Projetos\\ProjetoOff\\Gerador\\tests\\fixtures\\sample_basic.txt"
+        fixture = os.path.join(
+            os.path.dirname(__file__), "fixtures", "sample_basic.txt"
         )
         with open(fixture, encoding="utf-8") as f:
             lines = f.readlines()

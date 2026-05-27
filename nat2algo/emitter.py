@@ -100,26 +100,34 @@ _SPECIAL_HANDLERS: dict[str, object] = {
 }
 
 
+def _format_args(args: str) -> str:
+    """Aplica formatações nos argumentos, como conversão de operadores."""
+    if not args:
+        return args
+    args = re.sub(r'\bNE\b', '<>', args)
+    return args
+
 def _render_node(node: ASTNode) -> str:
     """Converte um nó folha em uma linha de pseudocódigo."""
     template = ALL_MAPPINGS.get(node.keyword)
+    formatted_args = _format_args(node.args)
 
     if template is None:
         if node.keyword == "COMMENT":
-            return f"// {node.args}" if node.args else ""
+            return f"// {formatted_args}" if formatted_args else ""
         if node.keyword == "UNKNOWN":
-            return f"/* {node.args} */"
-        return f"{node.keyword} {node.args}".strip()
+            return f"/* {formatted_args} */"
+        return f"{node.keyword} {formatted_args}".strip()
 
     if template in _SPECIAL_HANDLERS:
         handler = _SPECIAL_HANDLERS[template]  # type: ignore[index]
-        return handler(node.args)  # type: ignore[operator]
+        return handler(formatted_args)  # type: ignore[operator]
 
     if template.startswith("__"):
         # Marcadores de bloco DEFINE DATA tratados pelo _emit_define_data
         return ""
 
-    return template.replace("{args}", node.args).strip()
+    return template.replace("{args}", formatted_args).strip()
 
 
 # ── Emissão do bloco DEFINE DATA ──────────────────────────────────────────────
@@ -203,6 +211,7 @@ def _block_closer_text(opener_keyword: str) -> str:
         "READ":               "FIM-LEITURA",
         "HISTOGRAM":          "FIM-HISTOGRAMA",
         "DEFINE SUBROUTINE":  "FIM-SUBROTINA",
+        "DO":                 "FIM-FAÇA",
     }
     return closers.get(opener_keyword, "")
 

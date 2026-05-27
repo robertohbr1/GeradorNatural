@@ -61,6 +61,67 @@ class ParseError(Exception):
         self.line_no = line_no
 
 
+class TokenStream:
+    def __init__(self, tokens: Iterator[Token] | list[Token]):
+        if isinstance(tokens, list):
+            self._tokens = tokens
+        else:
+            self._tokens = list(tokens)
+        self.pos = 0
+
+    def __iter__(self) -> Iterator[Token]:
+        return self
+
+    def __next__(self) -> Token:
+        if self.pos >= len(self._tokens):
+            raise StopIteration
+        tok = self._tokens[self.pos]
+        self.pos += 1
+        return tok
+
+    def push(self, token: Token) -> None:
+        if self.pos > 0 and self._tokens[self.pos - 1] is token:
+            self.pos -= 1
+        else:
+            # Caso raro de push para algo não diretamente consumido
+            self._tokens.insert(self.pos, token)
+
+def _is_structured_if(stream: TokenStream) -> bool:
+    """Verifica se o IF atual possui um END-IF respectivo no bloco."""
+    depth = 1
+    for i in range(stream.pos, len(stream._tokens)):
+        kw = stream._tokens[i].keyword
+        if kw == "IF":
+            depth += 1
+        elif kw == "END-IF":
+            depth -= 1
+            if depth == 0:
+                return True
+        elif kw in ("DOEND", "LOOP", "END-SUBROUTINE", "END"):
+            if depth == 1:
+                return False
+    return False
+
+def _parse_single_statement(stream: TokenStream) -> list[ASTNode]:
+    """Lê exatamente um statement, que pode ser bloco DO...DOEND."""
+    try:
+        token = next(stream)
+    except StopIteration:
+        return []
+
+    if token.keyword in BLOCK_CLOSERS or token.keyword in ("ELSE", "END-IF"):
+        stream.push(token)
+        return []
+
+    if token.keyword == "DEFINE DATA":
+        return [_parse_define_data(token, stream)]
+    if token.keyword == "IF":
+        return [_parse_nested_block(token, stream)]
+    if token.keyword in BLOCK_OPENERS:
+        return [_parse_nested_block(token, stream)]
+
+    return [ASTNode(token.keyword, token.args, token.line_no)]
+
 def parse(tokens: list[Token]) -> Program:
     """Constrói um Program a partir da lista de tokens.
 
@@ -92,13 +153,13 @@ def parse(tokens: list[Token]) -> Program:
     body_tokens, subroutine_groups = _split_subroutines(tokens)
 
     for group in subroutine_groups:
-        sub_iter = iter(group)
-        opener = next(sub_iter)
-        sub_node = _parse_subroutine(opener, sub_iter)
+        sub_stream = TokenStream(iter(group))
+        opener = next(sub_stream)
+        sub_node = _parse_subroutine(opener, sub_stream)
         program.subroutines.append(sub_node)
 
-    iterator = iter(body_tokens)
-    body_nodes = _parse_block(iterator, stop_keywords=frozenset({"END"}))
+    stream = TokenStream(iter(body_tokens))
+    body_nodes = _parse_block(stream, stop_keywords=frozenset({"END"}))
     # END é incluído no body para que o emitter gere 'FIM'
     program.body = body_nodes
 
@@ -135,33 +196,41 @@ def _split_subroutines(
 
 
 def _parse_block(
-    iterator: Iterator[Token],
+    stream: TokenStream,
     stop_keywords: frozenset[str],
 ) -> list[ASTNode]:
-    """Lê tokens até encontrar uma stop_keyword ou exaurir o iterador.
+    """Lê tokens até encontrar uma stop_keyword ou um fechador inesperado.
 
     Esta função é chamada recursivamente para cada bloco aninhado.
     """
     nodes: list[ASTNode] = []
 
-    for token in iterator:
+    for token in stream:
         if token.keyword in stop_keywords:
             # Adiciona o token fechador como nó sentinela sem filhos
             nodes.append(ASTNode(token.keyword, token.args, token.line_no))
             return nodes
+            
+        # Se encontramos um fechador que não é esperado por este bloco,
+        # é porque um bloco pai ou implícito encerrou nosso escopo
+        # (ex: ELSE sem END-IF, cujo pai é fechado por DOEND).
+        if token.keyword in BLOCK_CLOSERS:
+            # Retorna o token para o stream para que o bloco pai possa vê-lo
+            stream.push(token)
+            return nodes
 
         if token.keyword == "DEFINE DATA":
-            data_node = _parse_define_data(token, iterator)
+            data_node = _parse_define_data(token, stream)
             nodes.append(data_node)
             continue
 
         if token.keyword == "IF":
-            block_node = _parse_nested_block(token, iterator)
+            block_node = _parse_nested_block(token, stream)
             nodes.append(block_node)
             continue
 
         if token.keyword in BLOCK_OPENERS:
-            block_node = _parse_nested_block(token, iterator)
+            block_node = _parse_nested_block(token, stream)
             nodes.append(block_node)
             continue
 
@@ -171,12 +240,8 @@ def _parse_block(
     return nodes
 
 
-def _parse_define_data(opener: Token, iterator: Iterator[Token]) -> ASTNode:
-    """Lê o bloco DEFINE DATA até END-DEFINE e retorna um ASTNode com filhos.
-
-    O lexer tokeniza 'DEFINE DATA LOCAL' como keyword='DEFINE DATA', args='LOCAL'.
-    Aqui criamos um nó filho LOCAL/GLOBAL/PARAMETER a partir dos args do opener.
-    """
+def _parse_define_data(opener: Token, stream: TokenStream) -> ASTNode:
+    """Lê o bloco DEFINE DATA até END-DEFINE e retorna um ASTNode com filhos."""
     data_node = ASTNode(opener.keyword, "", opener.line_no)
     scope_kws = {"LOCAL", "GLOBAL", "PARAMETER"}
 
@@ -185,7 +250,7 @@ def _parse_define_data(opener: Token, iterator: Iterator[Token]) -> ASTNode:
         scope_kw = opener.args.strip().upper()
         data_node.children.append(ASTNode(scope_kw, "", opener.line_no))
 
-    for token in iterator:
+    for token in stream:
         if token.keyword == "END-DEFINE":
             break
         data_node.children.append(ASTNode(token.keyword, token.args, token.line_no))
@@ -194,7 +259,7 @@ def _parse_define_data(opener: Token, iterator: Iterator[Token]) -> ASTNode:
 
 def _parse_nested_block(
     opener: Token,
-    iterator: Iterator[Token],
+    stream: TokenStream,
 ) -> ASTNode:
     """Cria um ASTNode para o bloco aberto por `opener` e preenche seus filhos.
 
@@ -204,54 +269,75 @@ def _parse_nested_block(
     node = ASTNode(opener.keyword, opener.args, opener.line_no)
 
     if opener.keyword == "IF":
-        node.children = _parse_if_children(iterator, opener.line_no)
+        node.children = _parse_if_children(stream, opener.line_no)
         return node
 
     closer = _closer_for(opener.keyword, opener.line_no)
-    node.children = _parse_block(iterator, stop_keywords=frozenset({closer}))
-    # Remove o token fechador da lista de filhos (é sentinela)
+    node.children = _parse_block(stream, stop_keywords=frozenset({closer}))
+    # Remove o token fechador da lista de filhos (é sentinela) se estiver lá
     node.children = [c for c in node.children if c.keyword != closer]
 
     return node
 
 
 def _parse_if_children(
-    iterator: Iterator[Token],
+    stream: TokenStream,
     if_line_no: int,
 ) -> list[ASTNode]:
     """Lê filhos de um bloco IF, criando um filho ELSE se houver."""
-    then_children = _parse_block(
-        iterator, stop_keywords=frozenset({"ELSE", "END-IF"})
-    )
+    is_struct = _is_structured_if(stream)
 
-    # O último elemento é o sentinela (ELSE ou END-IF)
-    if not then_children:
-        raise ParseError("Bloco IF sem conteúdo ou sem END-IF", if_line_no)
+    if is_struct:
+        then_children = _parse_block(
+            stream, stop_keywords=frozenset({"ELSE", "END-IF"})
+        )
 
-    sentinel = then_children[-1]
-    then_children = then_children[:-1]
+        if not then_children:
+            return []
 
-    if sentinel.keyword == "END-IF":
-        return then_children
+        sentinel = then_children[-1]
+        if sentinel.keyword not in ("ELSE", "END-IF"):
+            return then_children
+            
+        then_children = then_children[:-1]
 
-    # sentinel.keyword == "ELSE"
-    else_node = ASTNode("ELSE", "", sentinel.line_no)
-    else_children = _parse_block(iterator, stop_keywords=frozenset({"END-IF"}))
-    # Remove END-IF sentinela
-    else_node.children = [c for c in else_children if c.keyword != "END-IF"]
+        if sentinel.keyword == "END-IF":
+            return then_children
 
-    return then_children + [else_node]
+        else_node = ASTNode("ELSE", "", sentinel.line_no)
+        else_children = _parse_block(stream, stop_keywords=frozenset({"END-IF"}))
+        
+        if else_children and else_children[-1].keyword == "END-IF":
+            else_children = else_children[:-1]
+            
+        else_node.children = else_children
+        return then_children + [else_node]
+    else:
+        # Reporting Mode: exatamente um statement para THEN e um para ELSE
+        then_children = _parse_single_statement(stream)
+        
+        try:
+            next_tok = next(stream)
+        except StopIteration:
+            return then_children
+
+        if next_tok.keyword == "ELSE":
+            else_node = ASTNode("ELSE", "", next_tok.line_no)
+            else_node.children = _parse_single_statement(stream)
+            return then_children + [else_node]
+        else:
+            stream.push(next_tok)
+            return then_children
 
 
-def _parse_subroutine(opener: Token, iterator: Iterator[Token]) -> ASTNode:
+def _parse_subroutine(opener: Token, stream: TokenStream) -> ASTNode:
     """Lê o corpo de uma DEFINE SUBROUTINE até END-SUBROUTINE."""
     sub_node = ASTNode(opener.keyword, opener.args, opener.line_no)
     sub_node.children = _parse_block(
-        iterator, stop_keywords=frozenset({"END-SUBROUTINE"})
+        stream, stop_keywords=frozenset({"END-SUBROUTINE"})
     )
-    sub_node.children = [
-        c for c in sub_node.children if c.keyword != "END-SUBROUTINE"
-    ]
+    if sub_node.children and sub_node.children[-1].keyword == "END-SUBROUTINE":
+        sub_node.children = sub_node.children[:-1]
     return sub_node
 
 
@@ -267,6 +353,7 @@ def _closer_for(opener_keyword: str, line_no: int) -> str:
         "FIND":      "END-FIND",
         "READ":      "END-READ",
         "HISTOGRAM": "END-HISTOGRAM",
+        "DO":        "DOEND",
     }
     closer = mapping.get(opener_keyword)
     if closer is None:

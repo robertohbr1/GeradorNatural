@@ -62,6 +62,7 @@ OUTPUT: Final[dict[str, str]] = {
 # ── Entrada ───────────────────────────────────────────────────────────────────
 INPUT_STMT: Final[dict[str, str]] = {
     "INPUT": "LER {args}",
+    "REINPUT": "RELER {args}",
 }
 
 # ── Chamada de subrotinas e programas externos ─────────────────────────────────
@@ -84,6 +85,8 @@ FLOW: Final[dict[str, str]] = {
     "STOP":          "PARAR",
     "TERMINATE":     "ENCERRAR",
     "END":           "FIM",
+    "DO":            "FAÇA",
+    "DOEND":         "FIM-FAÇA",
 }
 
 # ── Bloco DEFINE DATA ─────────────────────────────────────────────────────────
@@ -116,6 +119,7 @@ BLOCK_OPENERS: Final[frozenset[str]] = frozenset({
     "FOR", "REPEAT",
     "FIND", "READ", "HISTOGRAM",
     "DEFINE SUBROUTINE",
+    "DO",
 })
 
 # Keywords que fecham um bloco
@@ -126,6 +130,7 @@ BLOCK_CLOSERS: Final[frozenset[str]] = frozenset({
     "END-SUBROUTINE",
     "END-DEFINE",
     "END",
+    "DOEND",
 })
 
 # Keywords que encerram o escopo de ELSE (tratadas pelo parser)
